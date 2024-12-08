@@ -15,35 +15,27 @@
 """Launch Isaac Sim Simulator first."""
 
 import argparse
-import sys
 
 from omni.isaac.lab.app import AppLauncher
 
 # local imports
 import cli_args  # isort: skip
 
-
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Train an RL agent with RSL-RL.")
 parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
 parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
-parser.add_argument("--video_interval", type=int, default=2000, help="Interval between video recordings (in steps).")
-parser.add_argument("--num_envs", type=int, default=1, help="Number of environments to simulate.")
+parser.add_argument("--disable_fabric", action="store_true", default=False, help="Disable fabric and use USD I/O operations.")
+parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
 parser.add_argument("--task", type=str, default=None, help="Name of the task.")
-parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment")
-parser.add_argument("--max_iterations", type=int, default=None, help="RL Policy training iterations.")
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
-args_cli, hydra_args = parser.parse_known_args()
-
+args_cli = parser.parse_args()
 # always enable cameras to record video
 if args_cli.video:
     args_cli.enable_cameras = True
-
-# clear out sys.argv for Hydra
-sys.argv = [sys.argv[0]] + hydra_args
 
 # launch omniverse app
 app_launcher = AppLauncher(args_cli)
@@ -98,9 +90,14 @@ from omni.isaac.lab.managers import TerminationTermCfg as DoneTerm
 
 # Task
 import omni.isaac.lab_tasks.manager_based.locomotion.velocity.mdp as mdp
-from omni.isaac.lab_tasks.utils import get_checkpoint_path
+from omni.isaac.lab_tasks.utils import get_checkpoint_path, parse_env_cfg
 from omni.isaac.lab_tasks.utils.hydra import hydra_task_config
-from omni.isaac.lab_tasks.utils.wrappers.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
+from omni.isaac.lab_tasks.utils.wrappers.rsl_rl import (
+    RslRlOnPolicyRunnerCfg,
+    RslRlVecEnvWrapper,
+    export_policy_as_jit,
+    export_policy_as_onnx,
+)
 
 # Environment
 # from omni.isaac.lab.envs.manager_based_env_cfg import ManagerBasedEnvCfg
@@ -689,163 +686,21 @@ class UnitreeGo1FlatEnvCfg():
         self.terminations.base_contact.params["sensor_cfg"].body_names = "trunk"
 
 
-
-# def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
-    
-#     """Runs the simulation loop."""
-    
-#     # Extract scene entities
-#     # note: we only do this here for readability.
-#     robot   = scene["robot"]
-#     balloon = scene["balloon"]
-#     # camera  = scene["camera"]
-#     # Define simulation stepping
-#     sim_dt  = sim.get_physics_dt()
-#     count   = 0
-#     # Simulation loop
-
-#     while simulation_app.is_running():
+@configclass
+class UnitreeGo1FlatEnvCfg_PLAY(UnitreeGo1FlatEnvCfg):
+    def __post_init__(self) -> None:
         
-#         # Reset
-#         if count % 1000 == 0:
-            
-#             # reset counter
-#             count = 0
-#             # reset the scene entities
-#             # root state
-#             # we offset the root state by the origin since the states are written in simulation world frame
-#             # if this is not done, then the robots will be spawned at the (0, 0, 0) of the simulation world
-#             root_state = robot.data.default_root_state.clone()
-#             root_state[:, :3] += scene.env_origins
-#             robot.write_root_state_to_sim(root_state)
-#             # set joint positions with some noise
-#             joint_pos, joint_vel = robot.data.default_joint_pos.clone(), robot.data.default_joint_vel.clone()
-#             joint_pos += torch.rand_like(joint_pos) * 0.1
-#             robot.write_joint_state_to_sim(joint_pos, joint_vel)
+        # post init of parent
+        super().__post_init__()
 
-#             print(scene.rigid_objects.keys)
-
-#             if isinstance(balloon, DeformableObject):
-                
-#                 # Reset the balloons
-#                 balloon_state = balloon.data.default_nodal_state_w.clone()
-#                 balloon.write_nodal_state_to_sim(balloon_state)
-#                 balloon.reset()
-
-#             elif isinstance(balloon, RigidObject):
-                
-#                 print(balloon.body_names)
-
-#                 # Reset the balloons
-#                 balloon_state = balloon.data.default_root_state.clone()
-#                 balloon_state[:, :3] += scene.env_origins
-#                 balloon.write_root_state_to_sim(balloon_state)
-#                 balloon.reset()
-
-#             # clear internal buffers
-#             scene.reset()
-#             print("[INFO]: Resetting robot state...")
-
-#         # Apply random action
-#         # -- generate random joint efforts
-#         efforts = torch.randn_like(robot.data.joint_pos) * 5.0
-#         # -- apply action to the robot
-#         robot.set_joint_effort_target(efforts)
-#         # -- write data to sim
-#         scene.write_data_to_sim()
-#         # Perform step
-#         sim.step()
-#         # Increment counter
-#         count += 1
-#         # Update buffers
-#         scene.update(sim_dt)
-
-
-#         # print("-------------------------------")
-
-#         # print(camera)
-
-#         # print("Received shape of rgb image: ", camera.data.output["rgb"].shape)
-
-#         # print("Received shape of depth image: ", camera.data.output["distance_to_image_plane"].shape)
-
-#         # print("-------------------------------")
-
-#         # print(scene["height_scanner"])
-
-#         # print("Received max height value: ", torch.max(scene["height_scanner"].data.ray_hits_w[..., -1]).item())
-
-#         # print("-------------------------------")
-
-#         # print(scene["contact_forces"])
-
-#         # print("Received max contact force of: ", torch.max(scene["contact_forces"].data.net_forces_w).item())
-
-
-
-# def findCamTarget(vp, rz, rx):
-    
-#     x = vp[0]
-#     y = vp[1]
-#     z = vp[2]
-
-#     pi  = np.pi
-#     cos = np.cos
-#     sin = np.sin
-
-#     rx = rx*pi/180
-#     rz = rz*pi/180
-
-#     t = [0, 0, 0]
-
-#     if abs(cos(rx) > 1e-3):    # There can be an intersection with ground plane z = 0
-#         print("Intersection with ground")
-#         k = z/cos(rx)
-#         t = [x - k*sin(rz)*sin(rx), y + k*cos(rz)*sin(rx), z - k*cos(rx)]
-#     elif abs(cos(rz)) > 1e-3:  # There can be an intersection with ground plane y = 0
-#         print("Intersection with y = 0")
-#         k = -y/cos(rz)
-#         t = [x - k*sin(rz), 0, z]
-#     else:  # There can be an intersection with ground plane x = 0
-#         print("Intersection with x = 0")
-#         k = x/sin(rz)
-#         t = [0, y + k*cos(rz), z]
-    
-#     return t
-
-
-
-# def main():
-
-#     """Main function."""
-#     # Load kit helper
-#     # sim_cfg = sim_utils.SimulationCfg(dt=0.0025, device=args_cli.device)
-#     # sim = SimulationContext(sim_cfg)
-    
-#     # Design scene
-#     # scene_cfg = BouncerSceneCfg(num_envs=args_cli.num_envs, env_spacing=2*wall_w+1)
-#     task_config = UnitreeGo1FlatEnvCfg(num_envs=69, env_spacing=7)
-#     task_config.sim.dt = 0.0025
-#     # task_config.sim.device = args_cli.device
-#     # sim_utils.SimulationCfg(dt=0.0025, device=args_cli.device)
-
-#     sim = SimulationContext(task_config.sim)
-#     scene = InteractiveScene(task_config.scene)
-
-#     # Set the view
-#     campos = [-25, -7, 9]
-#     camtar = findCamTarget(vp=campos, rz=-72, rx=72)
-#     sim.set_camera_view(campos, camtar)
-
-#     # Play the simulator
-#     sim.reset()
-    
-#     # Now we are ready!
-#     print("[INFO]: Setup complete...")
-    
-#     # Run the simulator
-#     run_simulator(sim, scene)
-
+        # make a smaller scene for play
+        self.scene.num_envs = 50
+        self.scene.env_spacing = 2.5
+        # disable randomization for play
+        self.observations.policy.enable_corruption = False
+        # remove random pushing event
+        self.events.base_external_force_torque = None
+        self.events.push_robot = None
 
 
 # endregion Defining the environment config ----------------------------------------------------------------------------------------------------------------------------
@@ -971,56 +826,42 @@ class UnitreeGo1FlatPPORunnerCfg():
 # Import extensions to set up environment tasks
 # import ext_template.tasks  # noqa: F401
 
-torch.backends.cuda.matmul.allow_tf32 = True
-torch.backends.cudnn.allow_tf32 = True
-torch.backends.cudnn.deterministic = False
-torch.backends.cudnn.benchmark = False
+# torch.backends.cuda.matmul.allow_tf32 = True
+# torch.backends.cudnn.allow_tf32 = True
+# torch.backends.cudnn.deterministic = False
+# torch.backends.cudnn.benchmark = False
 
 
 # @hydra_task_config(args_cli.task, "rsl_rl_cfg_entry_point")
-def main(env_cfg, agent_cfg):
+def main():
     
-    """Train with RSL-RL agent."""
-    
-    # override configurations with non-hydra CLI arguments
-    agent_cfg = cli_args.update_rsl_rl_cfg(agent_cfg, args_cli)
-    env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
-    agent_cfg.max_iterations = (
-        args_cli.max_iterations if args_cli.max_iterations is not None else agent_cfg.max_iterations
-    )
+    """Play with RSL-RL agent."""
 
-    # set the environment seed
-    # note: certain randomizations occur in the environment initialization so we set the seed here
-    env_cfg.seed = agent_cfg.seed
-    env_cfg.sim.device = args_cli.device if args_cli.device is not None else env_cfg.sim.device
+    gym.register(id="Isaac-Velocity-Flat-Unitree-Go1-NoBS-Play",
+                 entry_point="omni.isaac.lab.envs:ManagerBasedRLEnv",
+                 disable_env_checker=True,
+                 kwargs={"env_cfg_entry_point": f'{__name__}:UnitreeGo1FlatEnvCfg_PLAY',
+                         "rsl_rl_cfg_entry_point": f'{__name__}:UnitreeGo1FlatPPORunnerCfg'})
+
+    # parse configuration
+    env_cfg = parse_env_cfg('Isaac-Velocity-Flat-Unitree-Go1-NoBS-Play', device=args_cli.device, num_envs=args_cli.num_envs, use_fabric=not args_cli.disable_fabric)
+    agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg('Isaac-Velocity-Flat-Unitree-Go1-NoBS-Play', args_cli)
 
     # specify directory for logging experiments
-    log_root_path = '/home/tmn/ml_ws/IsaacLab/source/bouncer/logs'
+    log_root_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", "rsl_rl", agent_cfg.experiment_name)
     # log_root_path = os.path.abspath(log_root_path)
-    print(f"[INFO] Logging experiment in directory: {log_root_path}")
-    # specify directory for logging runs: {time-stamp}_{run_name}
-    log_dir = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    # if agent_cfg.run_name:
-    #     log_dir += f"_{agent_cfg.run_name}"
-    log_dir = os.path.join(log_root_path, log_root_path)
-
-    gym.register(
-        id="Isaac-Velocity-Flat-Unitree-Go1-NoBS",
-        entry_point="omni.isaac.lab.envs:ManagerBasedRLEnv",
-        disable_env_checker=True,
-        kwargs={
-            "env_cfg_entry_point": f'{__name__}:UnitreeGo1FlatEnvCfg',
-            "rsl_rl_cfg_entry_point": f'{__name__}:UnitreeGo1FlatPPORunnerCfg'
-        },
-    )
+    print(f"[INFO] Loading experiment from directory: {log_root_path}")
+    resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
+    log_dir = os.path.dirname(resume_path)
 
     # create isaac environment
-    env = gym.make('Isaac-Velocity-Flat-Unitree-Go1-NoBS', cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
+    env = gym.make('Isaac-Velocity-Flat-Unitree-Go1-NoBS-Play', cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
+    
     # # wrap for video recording
     # if args_cli.video:
     #     video_kwargs = {
-    #         "video_folder": os.path.join(log_dir, "videos", "train"),
-    #         "step_trigger": lambda step: step % args_cli.video_interval == 0,
+    #         "video_folder": os.path.join(log_dir, "videos", "play"),
+    #         "step_trigger": lambda step: step == 0,
     #         "video_length": args_cli.video_length,
     #         "disable_logger": True,
     #     }
@@ -1028,33 +869,46 @@ def main(env_cfg, agent_cfg):
     #     print_dict(video_kwargs, nesting=4)
     #     env = gym.wrappers.RecordVideo(env, **video_kwargs)
 
-    # convert to single-agent instance if required by the RL algorithm
+    # # convert to single-agent instance if required by the RL algorithm
     # if isinstance(env.unwrapped, DirectMARLEnv):
     #     env = multi_agent_to_single_agent(env)
 
     # wrap around environment for rsl-rl
     env = RslRlVecEnvWrapper(env)
 
-    # create runner from rsl-rl
-    runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device)
-    # write git state to logs
-    runner.add_git_repo_to_log(__file__)
-    # save resume path before creating a new log_dir
-    if agent_cfg.resume:
-        # get path to previous checkpoint
-        resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
-        print(f"[INFO]: Loading model checkpoint from: {resume_path}")
-        # load previously trained model
-        runner.load(resume_path)
+    print(f"[INFO]: Loading model checkpoint from: {resume_path}")
+    # load previously trained model
+    ppo_runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
+    ppo_runner.load(resume_path)
 
-    # dump the configuration into log-directory
-    dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
-    dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
-    dump_pickle(os.path.join(log_dir, "params", "env.pkl"), env_cfg)
-    dump_pickle(os.path.join(log_dir, "params", "agent.pkl"), agent_cfg)
+    # obtain the trained policy for inference
+    policy = ppo_runner.get_inference_policy(device=env.unwrapped.device)
 
-    # run training
-    runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
+    # export policy to onnx/jit
+    export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
+    export_policy_as_jit(
+        ppo_runner.alg.actor_critic, ppo_runner.obs_normalizer, path=export_model_dir, filename="policy.pt"
+    )
+    export_policy_as_onnx(
+        ppo_runner.alg.actor_critic, normalizer=ppo_runner.obs_normalizer, path=export_model_dir, filename="policy.onnx"
+    )
+
+    # reset environment
+    obs, _ = env.get_observations()
+    timestep = 0
+    # simulate environment 
+    while simulation_app.is_running():
+        # run everything in inference mode
+        with torch.inference_mode():
+            # agent stepping
+            actions = policy(obs)
+            # env stepping
+            obs, _, _, _ = env.step(actions)
+        # if args_cli.video:
+        #     timestep += 1
+        #     # Exit the play loop after recording one video
+        #     if timestep == args_cli.video_length:
+        #         break
 
     # close the simulator
     env.close()
@@ -1062,11 +916,11 @@ def main(env_cfg, agent_cfg):
 
 if __name__ == "__main__":
 
-    env_cfg = UnitreeGo1FlatEnvCfg()
-    agent_cfg = UnitreeGo1FlatPPORunnerCfg()
+    # env_cfg = UnitreeGo1FlatEnvCfg_PLAY()
+    # agent_cfg = UnitreeGo1FlatPPORunnerCfg()
 
     # run the main function
-    main(env_cfg = env_cfg, agent_cfg = agent_cfg)
+    main()
 
     # close sim app
     simulation_app.close()
