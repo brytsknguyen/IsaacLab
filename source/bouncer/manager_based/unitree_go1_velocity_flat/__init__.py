@@ -15,9 +15,7 @@ gym.register(id="Isaac-Velocity-Flat-Unitree-Go1-NoBS",
              entry_point="omni.isaac.lab.envs:ManagerBasedRLEnv",
              disable_env_checker=True,
              kwargs={"env_cfg_entry_point": f'{__name__}.env_cfg:UnitreeGo1FlatEnvCfg',
-                     "rsl_rl_cfg_entry_point": f'{__name__}.agent_cfg:UnitreeGo1FlatPPORunnerCfg'}
-            )
-
+                     "rsl_rl_cfg_entry_point": f'{__name__}.agent_cfg:UnitreeGo1FlatPPORunnerCfg'})
 
 gym.register(id="Isaac-Velocity-Flat-Unitree-Go1-NoBS-Play",
              entry_point="omni.isaac.lab.envs:ManagerBasedRLEnv",
