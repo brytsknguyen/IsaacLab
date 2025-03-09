@@ -154,30 +154,24 @@ class BouncerGo1EnvCfg(DirectRLEnvCfg):
     events.add_base_mass.params["asset_cfg"].body_names = "trunk"
     events.base_external_force_torque.params["asset_cfg"].body_names = "trunk"
     events.reset_robot_joints.params["position_range"] = (1.0, 1.0)
-    events.reset_base.params = {"pose_range":      {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-3.14, 3.14)},
-                                "velocity_range":  {"x":     (0.0, 0.0), 
-                                                    "y":     (0.0, 0.0),
-                                                    "z":     (0.0, 0.0),
-                                                    "roll":  (0.0, 0.0),
-                                                    "pitch": (0.0, 0.0),
-                                                    "yaw":   (0.0, 0.0)}}
+    events.reset_base.params = {"pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-3.14, 3.14)},
+                                "velocity_range": {"x": ( 0.0, 0.0), "y": ( 0.0, 0.0), "z": ( 0.0, 0.0), "roll": (0.0, 0.0), "pitch": (0.0, 0.0), "yaw": (0.0, 0.0)}}
 
     # robot
     robot: ArticulationCfg = UNITREE_GO1_CFG.replace(prim_path="/World/envs/env_.*/Robot")
-    contact_sensor: ContactSensorCfg = ContactSensorCfg(prim_path="/World/envs/env_.*/Robot/.*",
-                                                        history_length=3, update_period=0.005, track_air_time=True)
+    contact_sensor: ContactSensorCfg = ContactSensorCfg(prim_path="/World/envs/env_.*/Robot/.*", history_length=3, update_period=0.005, track_air_time=True)
 
     # reward scales
-    lin_vel_reward_scale            = 1.5
-    yaw_rate_reward_scale           = 0.75
-    z_vel_reward_scale              = -2.0
-    ang_vel_reward_scale            = -0.05
-    joint_torque_reward_scale       = -0.0002
-    joint_accel_reward_scale        = -2.5e-7
-    action_rate_reward_scale        = -0.01
-    feet_air_time_reward_scale      = 0.25
-    undersired_contact_reward_scale = -1.0
-    flat_orientation_reward_scale   = -2.5
+    reward_weight_lin_vel_xy_error   =  1.5
+    reward_weight_ang_vel_z_error    =  0.75
+    reward_weight_lin_vel_z          = -2.0
+    reward_weight_ang_vel_xy         = -0.05
+    reward_weight_joint_torque       = -0.0002
+    reward_weight_joint_accel        = -2.5e-7
+    reward_weight_action_rate        = -0.01
+    reward_weight_feet_air_time      =  0.25
+    reward_weight_undersired_contact = -1.0
+    reward_weight_flat_orientation   = -2.5
 
 
 # endregion Defininition for environmnt config ------------------------------------------------------------------------
@@ -211,12 +205,12 @@ class BouncerGo1Env(DirectRLEnv):
         self._episode_sums = {
             key: torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
             for key in [
-                "track_lin_vel_xy_exp",
-                "track_ang_vel_z_exp",
+                "lin_vel_xy_error",
+                "ang_vel_z_error",
                 "lin_vel_z_l2",
                 "ang_vel_xy_l2",
-                "dof_torques_l2",
-                "dof_acc_l2",
+                "joint_torque_l2",
+                "joint_accel_l2",
                 "action_rate_l2",
                 "feet_air_time",
                 # "undesired_contacts",
@@ -292,21 +286,21 @@ class BouncerGo1Env(DirectRLEnv):
     def _get_rewards(self) -> torch.Tensor:
         
         # linear velocity tracking
-        lin_vel_error = torch.sum(torch.square(self._commands[:, :2] - self._robot.data.root_lin_vel_b[:, :2]), dim=1)
-        lin_vel_error_mapped = torch.exp(-lin_vel_error / 0.25)
+        # lin_vel_xy_error = torch.sum(torch.square(self._commands[:, :2] - self._robot.data.root_lin_vel_b[:, :2]), dim=1)
+        lin_vel_xy_error = torch.exp((-1/0.25)*torch.sum(torch.square(self._commands[:, :2] - self._robot.data.root_lin_vel_b[:, :2]), dim=1))
         
         # yaw rate tracking
-        yaw_rate_error = torch.square(self._commands[:, 2] - self._robot.data.root_ang_vel_b[:, 2])
-        yaw_rate_error_mapped = torch.exp(-yaw_rate_error / 0.25)
+        # ang_vel_z_error = torch.square(self._commands[:, 2] - self._robot.data.root_ang_vel_b[:, 2])
+        ang_vel_z_error = torch.exp((-1/0.25)*(torch.square(self._commands[:, 2] - self._robot.data.root_ang_vel_b[:, 2])))
         
         # z velocity tracking
-        z_vel_error = torch.square(self._robot.data.root_lin_vel_b[:, 2])
+        lin_vel_z_error = torch.square(self._robot.data.root_lin_vel_b[:, 2])
         
         # angular velocity x/y
-        ang_vel_error = torch.sum(torch.square(self._robot.data.root_ang_vel_b[:, :2]), dim=1)
+        ang_vel_xy_error = torch.sum(torch.square(self._robot.data.root_ang_vel_b[:, :2]), dim=1)
         
         # joint torques
-        joint_torques = torch.sum(torch.square(self._robot.data.applied_torque), dim=1)
+        joint_torque = torch.sum(torch.square(self._robot.data.applied_torque), dim=1)
         
         # joint acceleration
         joint_accel = torch.sum(torch.square(self._robot.data.joint_acc), dim=1)
@@ -317,7 +311,7 @@ class BouncerGo1Env(DirectRLEnv):
         # feet air time
         first_contact = self._contact_sensor.compute_first_contact(self.step_dt)[:, self._feet_ids]
         last_air_time = self._contact_sensor.data.last_air_time[:, self._feet_ids]
-        air_time      = torch.sum((last_air_time - 0.5) * first_contact, dim=1) * (torch.norm(self._commands[:, :2], dim=1) > 0.1)
+        feet_air_time = torch.sum((last_air_time - 0.5) * first_contact, dim=1) * (torch.norm(self._commands[:, :2], dim=1) > 0.1)
         
         # undersired contacts
         net_contact_forces = self._contact_sensor.data.net_forces_w_history
@@ -327,15 +321,15 @@ class BouncerGo1Env(DirectRLEnv):
         flat_orientation = torch.sum(torch.square(self._robot.data.projected_gravity_b[:, :2]), dim=1)
 
         rewards = {
-            "track_lin_vel_xy_exp": lin_vel_error_mapped  * self.cfg.lin_vel_reward_scale            * self.step_dt,    #lin_vel_reward_scale            = 1.0
-            "track_ang_vel_z_exp":  yaw_rate_error_mapped * self.cfg.yaw_rate_reward_scale           * self.step_dt,    #yaw_rate_reward_scale           = 0.5
-            "lin_vel_z_l2":         z_vel_error           * self.cfg.z_vel_reward_scale              * self.step_dt,    #z_vel_reward_scale              = -2.0
-            "ang_vel_xy_l2":        ang_vel_error         * self.cfg.ang_vel_reward_scale            * self.step_dt,    #ang_vel_reward_scale            = -0.05
-            "dof_torques_l2":       joint_torques         * self.cfg.joint_torque_reward_scale       * self.step_dt,    #joint_torque_reward_scale       = -2.5e-5
-            "dof_acc_l2":           joint_accel           * self.cfg.joint_accel_reward_scale        * self.step_dt,    #joint_accel_reward_scale        = -2.5e-7
-            "action_rate_l2":       action_rate           * self.cfg.action_rate_reward_scale        * self.step_dt,    #action_rate_reward_scale        = -0.01
-            "feet_air_time":        air_time              * self.cfg.feet_air_time_reward_scale      * self.step_dt,    #feet_air_time_reward_scale      = 0.5
-            "flat_orientation_l2":  flat_orientation      * self.cfg.flat_orientation_reward_scale   * self.step_dt,    #flat_orientation_reward_scale   = -5.0
+            "lin_vel_xy_error":     lin_vel_xy_error      * self.cfg.reward_weight_lin_vel_xy_error    * self.step_dt,
+            "ang_vel_z_error":      ang_vel_z_error       * self.cfg.reward_weight_ang_vel_z_error     * self.step_dt,
+            "lin_vel_z_l2":         lin_vel_z_error       * self.cfg.reward_weight_lin_vel_z           * self.step_dt,
+            "ang_vel_xy_l2":        ang_vel_xy_error      * self.cfg.reward_weight_ang_vel_xy          * self.step_dt,
+            "joint_torque_l2":      joint_torque          * self.cfg.reward_weight_joint_torque        * self.step_dt,
+            "joint_accel_l2":       joint_accel           * self.cfg.reward_weight_joint_accel         * self.step_dt,
+            "action_rate_l2":       action_rate           * self.cfg.reward_weight_action_rate         * self.step_dt,
+            "feet_air_time":        feet_air_time         * self.cfg.reward_weight_feet_air_time       * self.step_dt,
+            "flat_orientation_l2":  flat_orientation      * self.cfg.reward_weight_flat_orientation    * self.step_dt,
             # "undesired_contacts":   contacts              * self.cfg.undersired_contact_reward_scale * self.step_dt,  undersired_contact_reward_scale = -1.0
         }
         reward = torch.sum(torch.stack(list(rewards.values())), dim=0)
